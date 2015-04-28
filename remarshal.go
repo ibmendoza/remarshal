@@ -1,20 +1,17 @@
 // remarshal, a utility to convert between serialization formats.
 // Copyright (C) 2014 Danyil Bohdan
+// Adapted by Isagani Mendoza
 // License: MIT
-package main
+package remarshal
 
 import (
 	"bytes"
 	"encoding/json"
 	"errors"
-	"flag"
 	"fmt"
 	"github.com/BurntSushi/toml"
 	"gopkg.in/yaml.v2"
-	"io/ioutil"
 	"os"
-	"path/filepath"
-	"strings"
 )
 
 type format int
@@ -25,11 +22,6 @@ const (
 	fJSON
 	fPlaceholder
 	fUnknown
-)
-
-const (
-	defaultFormatFlagValue = "unspecified"
-	defaultWrapFlagValue   = "key"
 )
 
 // convertMapsToStringMaps recursively converts values of type
@@ -101,41 +93,6 @@ func convertNumbersToInt64(item interface{}) (res interface{}, err error) {
 	}
 }
 
-func stringToFormat(s string) (f format, err error) {
-	switch strings.ToLower(s) {
-	case "toml":
-		return fTOML, nil
-	case "yaml":
-		return fYAML, nil
-	case "json":
-		return fJSON, nil
-	case defaultFormatFlagValue:
-		return fPlaceholder, errors.New("placeholder format")
-	default:
-		return fUnknown, errors.New("cannot convert string to format: '" +
-			s + "'")
-	}
-}
-
-// filenameToFormat tries to parse string s as "<formatName>2<formatName>".
-// It returns both formats as type format if successful.
-func filenameToFormat(s string) (inputf format, outputf format, err error) {
-	filenameParts := strings.Split(filepath.Base(s), "2")
-	if len(filenameParts) != 2 {
-		return fUnknown, fUnknown, errors.New(
-			"cannot determine format from filename")
-	}
-	prefix, err := stringToFormat(filenameParts[0])
-	if err != nil {
-		return fUnknown, fUnknown, err
-	}
-	suffix, err := stringToFormat(filenameParts[1])
-	if err != nil {
-		return fUnknown, fUnknown, err
-	}
-	return prefix, suffix, nil
-}
-
 // unmarshal decodes serialized data in the format inputFormat into a structure
 // of nested maps and slices.
 func unmarshal(input []byte, inputFormat format) (data interface{},
@@ -187,106 +144,44 @@ func marshal(data interface{}, outputFormat format,
 	return
 }
 
-// processCommandLine parses the command line arguments (including os.Args[0],
-// the program name) and sets the input and the output file names as well as
-// other conversion options based on them.
-func processCommandLine() (inputFile string, outputFile string,
-	inputFormat format, outputFormat format,
-	indentJSON bool, wrap string, unwrap string) {
-	var inputFormatStr, outputFormatStr string
+//inputF and outputF can be any of the following: TOML, JSON, YAML
+func Convert(input []byte, inputF, outputF string) (string, error) {
 
-	flag.StringVar(&inputFile, "i", "-", "input file")
-	flag.StringVar(&outputFile, "o", "-", "output file")
-	flag.StringVar(&wrap, "wrap", defaultWrapFlagValue,
-		"wrap the data in a map type with the given key")
-	flag.StringVar(&unwrap, "unwrap", defaultWrapFlagValue,
-		"only output the data stored under the given key")
-
-	// See if our program is named, e.g., "json2yaml" (normally due to having
-	// been started through a symlink).
-	inputFormat, outputFormat, err := filenameToFormat(os.Args[0])
-	formatFromProgramName := err == nil
-	if !formatFromProgramName {
-		// Only give the user an option to specify the input and the output
-		// format with flags when it is mandatory, i.e., when we are *not* being
-		// run as "json2yaml" or similar. This makes the usage messages for the
-		// "x2y" commands more accurate as well.
-		flag.StringVar(&inputFormatStr, "if", defaultFormatFlagValue,
-			"input format ('toml', 'yaml' or 'json')")
-		flag.StringVar(&outputFormatStr, "of", defaultFormatFlagValue,
-			"input format ('toml', 'yaml' or 'json')")
-	}
-	if !formatFromProgramName || outputFormat == fJSON {
-		flag.BoolVar(&indentJSON, "indent-json", true, "indent JSON output")
-	}
-	flag.Parse()
-	if !formatFromProgramName {
-		// Try to parse the format options we were given through the command
-		// line flags.
-		if inputFormat, err = stringToFormat(inputFormatStr); err != nil {
-			if inputFormat == fPlaceholder {
-				fmt.Println("please specify the input format")
-			} else {
-				fmt.Printf("please specify a valid input format ('%s' given)\n",
-					inputFormatStr)
-			}
-			os.Exit(1)
-		}
-		if outputFormat, err = stringToFormat(outputFormatStr); err != nil {
-			if outputFormat == fPlaceholder {
-				fmt.Println("please specify the output format")
-			} else {
-				fmt.Printf(
-					"please specify a valid output format ('%s' given)\n",
-					outputFormatStr)
-			}
-			os.Exit(1)
-		}
+	if inputF == outputF {
+		return "", errors.New("Input and output formats cannot be the same")
 	}
 
-	// Check for extraneous command line arguments. If we are running as "x2y"
-	// set inputFile if given on the command line without the -i flag.
-	tail := flag.Args()
-	if len(tail) > 0 {
-		if formatFromProgramName && len(tail) == 1 &&
-			(inputFile == "" || inputFile == "-") {
-			inputFile = flag.Arg(0)
-		} else {
-			if len(tail) == 1 {
-				fmt.Print("extraneous command line argument:")
-			} else {
-				fmt.Print("extraneous command line arguments:")
-			}
-			for _, a := range tail {
-				fmt.Printf(" '%s'", a)
-			}
-			fmt.Printf("\n")
-			os.Exit(1)
-		}
+	var inputFormat format
+
+	switch inputF {
+	case "TOML":
+		inputFormat = fTOML
+	case "JSON":
+		inputFormat = fJSON
+	case "YAML":
+		inputFormat = fYAML
+	default:
+		inputFormat = -1
 	}
-	return
-}
 
-func main() {
-	inputFile, outputFile, inputFormat, outputFormat,
-		indentJSON, wrap, unwrap := processCommandLine()
-
-	// Read the input data from either standard input or a file.
-	var input []byte
-	var err error
-	if inputFile == "" || inputFile == "-" {
-		input, err = ioutil.ReadAll(os.Stdin)
-	} else {
-		if _, err := os.Stat(inputFile); os.IsNotExist(err) {
-			fmt.Printf("no such file or directory: '%s'\n", inputFile)
-			os.Exit(1)
-		}
-		input, err = ioutil.ReadFile(inputFile)
+	if inputFormat == -1 {
+		return "", errors.New("Wrong input format: must be TOML, JSON or YAML")
 	}
-	if err != nil {
-		fmt.Println(err)
-		os.Exit(1)
 
+	var outputFormat format
+	switch outputF {
+	case "TOML":
+		outputFormat = fTOML
+	case "JSON":
+		outputFormat = fJSON
+	case "YAML":
+		outputFormat = fYAML
+	default:
+		outputFormat = -1
+	}
+
+	if outputFormat == -1 {
+		return "", errors.New("Wrong output format: must be TOML, JSON or YAML")
 	}
 
 	// Convert the input data from inputFormat to outputFormat.
@@ -295,36 +190,13 @@ func main() {
 		fmt.Println(err)
 		os.Exit(1)
 	}
-	// Unwrap and/or wrap the data in a map if we were told to.
-	if unwrap != defaultWrapFlagValue {
-		temp, ok := data.(map[string]interface{})
-		if !ok {
-			fmt.Printf("cannot unwrap data: top-level value not a map\n")
-			os.Exit(1)
-		}
-		data, ok = temp[unwrap]
-		if !ok {
-			fmt.Printf("cannot unwrap data: no key '%s'\n", unwrap)
-			os.Exit(1)
-		}
-	}
-	if wrap != defaultWrapFlagValue {
-		data = map[string]interface{}{wrap: data}
-	}
+
+	indentJSON := true
 	output, err := marshal(data, outputFormat, indentJSON)
 	if err != nil {
 		fmt.Printf("cannot convert data: %v\n", err)
 		os.Exit(1)
 	}
 
-	// Print the result to either standard output or a file.
-	if outputFile == "" || outputFile == "-" {
-		fmt.Printf("%s\n", string(output))
-	} else {
-		err = ioutil.WriteFile(outputFile, output, 0644)
-		if err != nil {
-			fmt.Printf("cannot write to file %s\n", outputFile)
-			os.Exit(1)
-		}
-	}
+	return string(output), nil
 }
