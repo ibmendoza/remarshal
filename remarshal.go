@@ -1,6 +1,6 @@
 // remarshal, a utility to convert between serialization formats.
 // Copyright (C) 2014 Danyil Bohdan
-// Adapted by Isagani Mendoza
+// Adapted by Isagani Mendoza (http://itjumpstart.wordpress.com)
 // License: MIT
 package remarshal
 
@@ -8,10 +8,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"github.com/BurntSushi/toml"
 	"gopkg.in/yaml.v2"
-	"os"
 )
 
 type format int
@@ -187,15 +185,13 @@ func Convert(input []byte, inputF, outputF string) (string, error) {
 	// Convert the input data from inputFormat to outputFormat.
 	data, err := unmarshal(input, inputFormat)
 	if err != nil {
-		fmt.Println(err)
-		os.Exit(1)
+		return "", err
 	}
 
 	indentJSON := true
 	output, err := marshal(data, outputFormat, indentJSON)
 	if err != nil {
-		fmt.Printf("cannot convert data: %v\n", err)
-		os.Exit(1)
+		return "", err
 	}
 
 	return string(output), nil
